@@ -32,6 +32,12 @@ INT_8259A_ICW2 EQU 01100000B ;ICW2,IR0,60H
 INT_8259A_ICW4 EQU 00000011B ; auto EOI
 INT_8259A_OCW1 EQU 00000000B
 
+COM_PORT_8251A_DATA EQU 0008H
+COM_PORT_8251A_CONTROL EQU 000AH
+
+COM_REFRESH_WEATHER_CH EQU 'R' 
+COM_NEXT_WEATHER_CH EQU 'N'
+
 num_seg db 0C0H,0F9H,0A4H,0B0H,99H,92H,82H,0F8H,80H,90H; 0-9   
 led_hour db 1,3
 led_min db 5,9
@@ -50,16 +56,37 @@ START:
 	call init_TIME_8253A
 	call setup_int_60
 	call init_8259A
+	call init_COM
 	; 这里的sti必须打开才能相应int
 	sti
-	
-	int 60h
-	
 	; get time
 	show:     
 	call show_time
 	jmp show
 	hlt 
+
+; char -> com -> esp8266
+send_com_ch macro cha
+    push dx
+    push ax
+    mov dx,COM_PORT_8251A_DATA
+    mov al,cha
+    out dx,al
+    pop ax
+    pop dx
+send_com_ch endm
+
+;初始化串口
+init_COM proc  
+    MOV   DX, COM_PORT_8251A_CONTROL
+    MOV   AL, 01001101b   ;写模式字  1停止位,无校验,8数据位, x1
+    OUT   DX, AL
+    nop 
+    MOV   AL, 00010101b   ;控制字 清出错标志, 允许发送接收
+    OUT   DX, AL    
+    ret    
+init_COM endp
+
 
 ; interrupt 80h
 setup_int_60 proc
@@ -92,6 +119,8 @@ setup_int_60 proc
 
 ret 
 setup_int_60 endp
+
+
 
 ; 增加时间
 add_time macro
@@ -138,6 +167,9 @@ jmp end
 jmp end
     check_h_2:
     ; 进一个小时，
+    ; 通知ESP8266准备刷新
+    send_com_ch COM_REFRESH_WEATHER_CH
+    ;
     mov ds:[bx],0
     mov bx,offset led_hour
     mov al,ds[bx]
@@ -193,7 +225,7 @@ init_8259A endp
 ; 初始化时间8255A
 init_TIME_8255A  proc
 mov dx,TIME_PORT_8255_CONFIG
-mov al,10000000B
+mov al,10001001B
 out dx,al
 mov dx,TIME_PORT_8255_B
 ret
