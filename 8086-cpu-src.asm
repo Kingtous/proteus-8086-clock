@@ -13,55 +13,28 @@
 ; in the 8086 model properties to 0x10000
 ;====================================================================
 
-data segment                                
-TIME_PORT_8255_A EQU 0010H
-TIME_PORT_8255_B EQU 0012H
-TIME_PORT_8255_C EQU 0014H
-TIME_PORT_8255_CONFIG EQU 0016H
-
-TIME_PORT_8253_A EQU 0018H
-TIME_PORT_8253_B EQU 001AH
-TIME_PORT_8253_C EQU 001CH
-TIME_PORT_8253_CONFIG EQU 001EH
-
-INT_8259A_PORT_0 EQU 0000H
-INT_8259A_PORT_1 EQU 0002H
-
-INT_8259A_ICW1 EQU 00010011B ; ICW1,high trigger, single chip, icw4
-INT_8259A_ICW2 EQU 01100000B ;ICW2,IR0,60H
-INT_8259A_ICW4 EQU 00000011B ; auto EOI
-INT_8259A_OCW1 EQU 00000000B
-
-COM_PORT_8251A_DATA EQU 0008H
-COM_PORT_8251A_CONTROL EQU 000AH
-
-COM_REFRESH_WEATHER_CH EQU 'R' 
-COM_NEXT_WEATHER_CH EQU 'N'
-
-num_seg db 0C0H,0F9H,0A4H,0B0H,99H,92H,82H,0F8H,80H,90H; 0-9   
-led_hour db 1,3
-led_min db 5,9
-led_sec db 5,5
-
-data ends
-
 
 CODE SEGMENT
-assume cs:CODE,ds:data
+assume cs:CODE,ds:CODE,ss:stack
 
 START:
-    mov ax,data
+    mov ax,CODE
     mov ds,ax
+    mov ss,ax
+    mov ax,sta_length
+    mov sp,ax
+    
 	call init_TIME_8255A
+	call init_8259A
 	call init_TIME_8253A
 	call setup_int_60
-	call init_8259A
 	call init_COM
 	; 这里的sti必须打开才能相应int
 	sti
 	; get time
-	show:     
+	show:  
 	call show_time
+	;call check_pc
 	jmp show
 	hlt 
 
@@ -121,15 +94,15 @@ ret
 setup_int_60 endp
 
 
-
 ; 增加时间
 add_time macro
+    LOCAL check_s_1, check_s_2,check_m_2,check_m_1,check_h_2,re_h,end 
     push ax
     push bx
     push dx
     ; 检查秒
     check_s_1:
-    mov bx,offset led_sec
+    lea bx,led_sec
     ; al <- 秒的个位
     mov al,ds:[bx]+1
     cmp al,8
@@ -149,7 +122,7 @@ jmp end
     check_m_2:
     ; 进一分钟，al <- 分的个位
     mov ds:[bx],0
-    mov bx,offset led_min
+    lea bx,led_min
     mov al,ds:[bx]+1
     cmp al,8
     ja check_m_1
@@ -171,7 +144,7 @@ jmp end
     send_com_ch COM_REFRESH_WEATHER_CH
     ;
     mov ds:[bx],0
-    mov bx,offset led_hour
+    lea bx,led_hour
     mov al,ds[bx]
     mov dl,10
     mul dl
@@ -192,7 +165,7 @@ jmp end
     pop dx
     pop bx
     pop ax        
-endm
+add_time endm
 
 ; int 30h service code,add 1 sec
 int_60_service:
@@ -205,20 +178,23 @@ int_60_end:
     
 ; 30-37H
 init_8259A proc
+    push dx
+    push ax
     mov dx,INT_8259A_PORT_0
     mov al,INT_8259A_ICW1 ; ICW1,high trigger, single chip, icw4
     out dx,al
-    JMP $+2
+    nop
     mov dx,INT_8259A_PORT_1
     mov al,INT_8259A_ICW2 ;ICW2,IR0,60H
     out dx,al
-    JMP $+2
+    nop
     mov al,INT_8259A_ICW4 ;ICW4,自动EOI
     out dx,al
-    JMP $+2
+    nop
     mov al,INT_8259A_OCW1;OCW1
     out dx,al
-    JMP $+2
+    pop ax
+    pop dx
     ret
 init_8259A endp
 
@@ -254,6 +230,30 @@ out dx,al
 
 ret
 init_TIME_8253A endp
+
+; 检查8255 PC输入
+check_pc proc
+    push ax
+    push bx
+    push dx
+    pushf
+    check_pc_1:
+    mov dx,TIME_PORT_8255_C
+    in al,dx
+    test al,00000001B
+    jz check_pc_2
+    ; PC0 pressed
+    lea bx,led_mode
+    mov al,ds:[bx]
+    xor al,1
+    mov ds:[bx],al
+    check_pc_2:
+
+    pop dx
+    pop bx
+    pop ax 
+    ret    
+check_pc endp
 	
 ; 显示时间到显示屏上
 show_time proc
@@ -261,7 +261,14 @@ show_time proc
 	push bx
 	push ax
 	push dx
-    mov cx,6
+	; 判断是否需要显示
+	lea bx,led_mode
+	mov al,ds:[bx]
+	cmp al,LED_POWERSAVE
+	jne show_time_start
+	jmp show_time_end
+show_time_start:	
+    mov cx,6         
 show_time_again:
 	mov bx,cx
 	dec bx
@@ -279,11 +286,12 @@ show_time_again:
 	out dx,al
 	call delay
 	loop show_time_again
+show_time_end:
 	pop dx
 	pop ax
 	pop bx
 	pop cx
-ret 
+    ret 
 show_time endp
 
 delay proc
@@ -327,7 +335,50 @@ C16_10 ENDP
 
 ; data
 
+; data start
+TIME_PORT_8255_A EQU 0010H
+TIME_PORT_8255_B EQU 0012H
+TIME_PORT_8255_C EQU 0014H
+TIME_PORT_8255_CONFIG EQU 0016H
+
+TIME_PORT_8253_A EQU 0018H
+TIME_PORT_8253_B EQU 001AH
+TIME_PORT_8253_C EQU 001CH
+TIME_PORT_8253_CONFIG EQU 001EH
+
+INT_8259A_PORT_0 EQU 0000H
+INT_8259A_PORT_1 EQU 0002H
+
+INT_8259A_ICW1 EQU 00010011B ; ICW1,high trigger, single chip, icw4
+INT_8259A_ICW2 EQU 01100000B ;ICW2,IR0,60H
+INT_8259A_ICW4 EQU 00000011B ; auto EOI
+INT_8259A_OCW1 EQU 00000000B
+
+COM_PORT_8251A_DATA EQU 0008H
+COM_PORT_8251A_CONTROL EQU 000AH
+
+COM_REFRESH_WEATHER_CH EQU 'R' 
+COM_NEXT_WEATHER_CH EQU 'N'
+
+LED_POWERSAVE EQU 00H
+LED_NORMOL EQU 01H          
+           
+num_seg db 0C0H,0F9H,0A4H,0B0H,99H,92H,82H,0F8H,80H,90H; 0-9
+   
+led_hour db 1,3
+led_min db 5,9
+led_sec db 5,5
+led_mode db 01h ;省电模式00，显示模式01
+; data end
+
 CODE    ENDS
+
+stack segment 'stack'
+
+sta dw 128 dup(0)
+sta_length EQU $
+    
+stack ends
 
 
 END START
