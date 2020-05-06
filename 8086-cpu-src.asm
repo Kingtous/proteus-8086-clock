@@ -37,8 +37,9 @@ START:
 	show:  
 	call show_time
 	call check_time_pc
+	call check_buzzer_time_pc
 	call check_sound
-	call check_weather
+	;call check_weather
 	jmp show
 	hlt 
 
@@ -52,6 +53,52 @@ send_com_ch macro cha
     pop ax
     pop dx
 endm
+
+; COM指令
+check_buzzer_time_pc proc
+	push dx
+	push ax
+	
+mov cx,0
+
+check_buzzer_time_pc5:
+	mov dx,BUZZER_PORT_8255_C
+	in al,dx
+	; 3-0位为输出，为0
+	or al,0FH
+	not al
+	and al,00100000B
+	je check_buzzer_time_pc5_end
+	mov cx,1
+	jmp check_buzzer_time_pc5
+check_buzzer_time_pc5_end:
+	cmp cx,1
+	jne check_buzzer_time_pc7
+	send_com_ch 'R'
+	
+mov cx,0
+; 翻页
+check_buzzer_time_pc7:
+	mov dx,BUZZER_PORT_8255_C
+	in al,dx
+	; 3-0位为输出，为0
+	or al,0FH
+	not al
+	and al,10000000B
+	je check_buzzer_time_pc7_end
+	mov cx,1
+	jmp check_buzzer_time_pc7
+check_buzzer_time_pc7_end:
+	cmp cx,1
+	jne check_buzzer_time_pc_end
+	send_com_ch 'N'
+
+check_buzzer_time_pc_end:
+	pop ax
+	pop dx
+	ret
+check_buzzer_time_pc endp
+
 
 ; 检查声音
 check_sound proc
@@ -264,20 +311,19 @@ init_8259A endp
 
 ; init time 8255A
 init_TIME_8255A  proc
-mov dx,TIME_PORT_8255_CONFIG
-mov al,10001001B
-out dx,al
-mov dx,TIME_PORT_8255_B
-ret
+	mov dx,TIME_PORT_8255_CONFIG
+	mov al,10001001B
+	out dx,al
+	mov dx,TIME_PORT_8255_B
+	ret
 init_TIME_8255A  endp
 
 ; init BUZZER
 init_BUZZER_8255A  proc
-mov dx,BUZZER_PORT_8255_CONFIG
-mov al,10001000B
-out dx,al
-mov dx,TIME_PORT_8255_B
-ret
+	mov dx,BUZZER_PORT_8255_CONFIG
+	mov al,10001000B ;
+	out dx,al
+	ret
 init_BUZZER_8255A  endp
 
 ; 3?ê??ˉ￡?ê?3?1sμ???3?
@@ -472,6 +518,7 @@ check_time_pc2_end:
 	jne check_time_pc3
 	lea bx,clock_hour
 	call change_clock_status
+
 mov cx,0
 
 check_time_pc3:
@@ -526,9 +573,53 @@ check_time_pc5:
 	jmp check_time_pc5
 check_time_pc5_end:
 	cmp cx,1
-	jne check_time_end
+	jne check_time_pc6
 	lea bx,clock_hour
 	call clock_sleepy
+
+mov cx,0
+
+; hour +=1
+check_time_pc6:
+	in al,dx
+	not al
+	; al保存着状态，1表示按下
+	and al,01000000B
+	cmp al,0
+	je check_time_pc6_end
+	; clock : hour + 1
+	mov cx,1
+	jmp check_time_pc6
+check_time_pc6_end:
+	cmp cx,1
+	jne check_time_pc7
+	lea bx,clock_hour
+	cli
+	lea bx,led_hour 
+	call inc_hour
+	sti
+
+mov cx,0
+
+; hour +=1
+check_time_pc7:
+	in al,dx
+	not al
+	; al保存着状态，1表示按下
+	and al,10000000B
+	cmp al,0
+	je check_time_pc7_end
+	; clock : hour + 1
+	mov cx,1
+	jmp check_time_pc7
+check_time_pc7_end:
+	cmp cx,1
+	jne check_time_end
+	lea bx,clock_hour
+	cli
+	lea bx,led_min 
+	call inc_min
+	sti
 
 check_time_end:
 	pop di
@@ -638,9 +729,16 @@ show_time_again:
 	push bx
 	mov bl,clock_enabled
 	cmp bl,0
-	jz cont
+	jz check_time_clock
 	; clock enabled
 	or al,01000000B
+	; show time enable
+	check_time_clock:
+	mov bl,led_time_clock
+	cmp bl,0
+	jz cont
+	;int 3h
+	or al,10000000B
 	cont:
 	pop bx
 	out dx,al
@@ -773,6 +871,5 @@ sta dw 256 dup(0)
 sta_length EQU $
     
 stack ends
-
 
 END START
