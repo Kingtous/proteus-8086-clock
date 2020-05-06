@@ -39,6 +39,7 @@ START:
 	call check_time_pc
 	call check_buzzer_time_pc
 	call check_sound
+	call output_light
 	;call check_weather
 	jmp show
 	hlt 
@@ -53,6 +54,26 @@ send_com_ch macro cha
     pop ax
     pop dx
 endm
+; 跑马灯
+output_light proc
+	push dx
+	push ax
+	cmp led_mode,00H
+	jne light_on
+	;light off
+	mov dx,BUZZER_PORT_8255_A
+	mov al,0
+	out dx,al
+	jmp output_light_end
+	light_on:
+	mov dx,BUZZER_PORT_8255_A
+	mov al,light_values
+	out dx,al
+	output_light_end:
+	pop ax
+	pop dx
+	ret
+output_light endp
 
 ; COM指令
 check_buzzer_time_pc proc
@@ -137,6 +158,7 @@ init_COM proc
 init_COM endp
 
 
+
 ; interrupt 80h
 setup_int_60 proc
     push ax
@@ -170,16 +192,17 @@ ret
 setup_int_60 endp
 
 
-; ???óê±??
+; 秒+1
 add_time proc far
     ;LOCAL check_s_1, check_s_2,check_m_2,check_m_1,check_h_2,re_h,end 
     push ax
     push bx
     push dx
-    ; ?ì2é??
+	push cx
+	mov cx,0
     check_s_1:
     lea bx,led_sec
-    ; al <- ??μ?????
+    ; al <- second
     mov al,ds:[bx]+1
     cmp al,8
     ja check_s_2
@@ -215,9 +238,11 @@ jmp add_time_end
     mov ds:[bx],al
 jmp add_time_end
     check_h_2:
-    ; ??ò???D?ê±￡?
+    ; 进位
     ; í¨?aESP8266×?±??￠D?
     send_com_ch COM_REFRESH_WEATHER_CH
+	; 报时
+	mov cx,1
     ;
     mov byte ptr ds:[bx],00H
     lea bx,led_hour
@@ -240,6 +265,23 @@ jmp add_time_end
     add_time_end:
 	; 增加结束，检查闹铃
 	call check_should_clock_ring
+	mov al,light_values
+	rol al,1
+	mov light_values,al
+	cmp cx,1
+	je open_hour_sound;要响铃
+	; 不响铃
+	mov dx,BUZZER_PORT_8255_B
+	mov al,00000000B
+	out dx,al
+	jmp open_hour_sound_end
+open_hour_sound:	
+	; 响铃
+	mov dx,BUZZER_PORT_8255_B
+	mov al,00000100B
+	out dx,al
+open_hour_sound_end:
+	pop cx
     pop dx
     pop bx
     pop ax
@@ -840,26 +882,28 @@ COM_REFRESH_WEATHER_CH EQU 'R'
 COM_NEXT_WEATHER_CH EQU 'N'
 
 LED_POWERSAVE EQU 00H
-LED_NORMOL EQU 01H  
+LED_NORMOL EQU 01H
 
 LED_TIME_MODE EQU 00H
 LED_CLOCK_MODE EQU 01H        
-           
+
 num_seg db 0C0H,0F9H,0A4H,0B0H,99H,92H,82H,0F8H,80H,90H; 0-9
-   
+
 led_hour db 1,3
 led_min db 5,9
 led_sec db 5,5
 
-led_mode db 01h ;00省电模式，01显示模式
-
-led_time_clock db 00H; 00H显示时间，01H显示闹钟设置
-clock_enabled db 01H ; 00H闹钟未开启，01H闹钟开启
-clock_sounded db 00H ;00H闹钟不响铃，01H闹钟响铃
-clock_hour db 1,4
+clock_hour db 0,6
 clock_min db 0,0
 clock_sec db 0,0
 
+led_mode db 01h ;00省电模式，01显示模式
+led_time_clock db 00H; 00H显示时间，01H显示闹钟设置
+clock_enabled db 00H ; 00H闹钟未开启，01H闹钟开启
+clock_sounded db 00H ;00H闹钟不响铃，01H闹钟响铃
+hour_sounded db 00H ;00H报时不响，01H报时铃响
+
+light_values db 00000111B ;跑马灯
 
 ; data end
 
@@ -871,5 +915,6 @@ sta dw 256 dup(0)
 sta_length EQU $
     
 stack ends
+
 
 END START
