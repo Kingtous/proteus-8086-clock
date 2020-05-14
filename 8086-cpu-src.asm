@@ -159,7 +159,7 @@ init_COM endp
 
 
 
-; interrupt 60h
+; interrupt 80h
 setup_int_60 proc
     push ax
     push cx
@@ -893,7 +893,7 @@ led_hour db 1,3
 led_min db 5,9
 led_sec db 5,5
 
-clock_hour db 1,4
+clock_hour db 0,6
 clock_min db 0,0
 clock_sec db 0,0
 
